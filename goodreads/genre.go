@@ -95,10 +95,10 @@ func (g *Genres) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	genres := shelvesToGenres(shelfNames)
 
 	// Only use first (up to) three genres
-	if len(genres) < 6 {
+	if len(genres) < 5 {
 		*g = genres
 	} else {
-		*g = genres[:6]
+		*g = genres[:5]
 	}
 
 	return nil

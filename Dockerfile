@@ -1,12 +1,12 @@
 # Builder Image
-FROM golang:1.21 as builder
+FROM golang:1.21 AS builder
 
 WORKDIR /abs-tract
 COPY . .
 RUN go mod download
 RUN go build -v -o bin/abs-tract
 
-# Ditribution Image
+# Distribution Image
 FROM alpine:latest
 
 RUN apk add --no-cache libc6-compat
