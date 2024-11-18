@@ -94,11 +94,10 @@ func (g *Genres) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	// Convert shelf names to genres
 	genres := shelvesToGenres(shelfNames)
 
-	// Only use first (up to) three genres
-	if len(genres) < 5 {
+	if len(genres) < 7 {
 		*g = genres
 	} else {
-		*g = genres[:5]
+		*g = genres[:7]
 	}
 
 	return nil
