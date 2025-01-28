@@ -7,6 +7,7 @@ import (
 	"github.com/ahobsonsayers/abs-tract/utils"
 	"github.com/antchfx/htmlquery"
 	"github.com/antchfx/xpath"
+	mapset "github.com/deckarep/golang-set/v2"
 	"golang.org/x/net/html"
 )
 
@@ -14,7 +15,7 @@ const publishDateLayout = "Jan 2, 2006"
 
 var (
 	bookCoverSetExpr  = xpath.MustCompile(`.//img/@srcset`)
-	bookFormatExpr    = xpath.MustCompile(`.//a[contains(text(), "Kindle Edition")]//text()`)
+	bookFormatExpr    = xpath.MustCompile(`.//a[matches(., "Kindle|Hardcover|Paperback")]//text()`)
 	bookInfoExpr      = xpath.MustCompile(`.//div[contains(@class, "a-color-secondary")]`)
 	bookTitleExpr     = xpath.MustCompile(`.//h2`)
 	searchResultsExpr = xpath.MustCompile(`//div[contains(@class, "s-result-list")]//div[@data-index and @data-asin]`)
@@ -22,36 +23,42 @@ var (
 
 type Book struct {
 	ASIN        string
+	Format      string
 	Title       string
 	Author      string
 	Cover       string
 	PublishDate *time.Time
 }
 
-// BooksFromHTML parses and returns the books from the html of a search results page
+// BooksFromHTML parses the books from the html of a search results page.
 func BooksFromHTML(searchNode *html.Node) ([]Book, error) {
 	resultNodes := htmlquery.QuerySelectorAll(searchNode, searchResultsExpr)
 
 	books := make([]Book, 0, len(resultNodes))
+	seenAsins := mapset.NewSet[string]()
 	for _, resultNode := range resultNodes {
-		if !isKindleBook(resultNode) {
-			continue
-		}
-
+		// Attempt to parse result as a book, recording it if it
+		// could be parsed and the asin has not already been seen
 		book := BookFromHTML(resultNode)
-		if book != nil {
+		if book != nil && !seenAsins.Contains(book.ASIN) {
 			books = append(books, *book)
+			seenAsins.Add(book.ASIN)
 		}
 	}
 
 	return books, nil
 }
 
-// BookFromHTML parses and returns a book from the html
-// of a book result on the search results page
+// BookFromHTML parses a book from the html of a result on the search results page.
+// If a result is not for a book, nil will is returned.
 func BookFromHTML(bookNode *html.Node) *Book {
 	asin := bookAsin(bookNode)
 	if asin == "" {
+		return nil
+	}
+
+	format := bookFormat(bookNode)
+	if format == "" {
 		return nil
 	}
 
@@ -65,6 +72,7 @@ func BookFromHTML(bookNode *html.Node) *Book {
 
 	return &Book{
 		ASIN:        asin,
+		Format:      format,
 		Title:       title,
 		Author:      author,
 		Cover:       cover,
@@ -72,20 +80,20 @@ func BookFromHTML(bookNode *html.Node) *Book {
 	}
 }
 
-func isKindleBook(bookNode *html.Node) bool {
-	bookFormatNode := htmlquery.QuerySelector(bookNode, bookFormatExpr)
-	if bookFormatNode == nil {
-		return false
-	}
-	bookFormatNodeValue := htmlquery.InnerText(bookFormatNode)
-
-	bookFormat := strings.ToLower(bookFormatNodeValue)
-	return strings.Contains(bookFormat, "kindle")
-}
-
 // bookAsin gets the book asim.
 func bookAsin(bookNode *html.Node) string {
 	return htmlquery.SelectAttr(bookNode, "data-asin")
+}
+
+// bookFormat gets the book format
+func bookFormat(bookNode *html.Node) string {
+	bookFormatNode := htmlquery.QuerySelector(bookNode, bookFormatExpr)
+	if bookFormatNode == nil {
+		return ""
+	}
+
+	bookFormatNodeValue := htmlquery.InnerText(bookFormatNode)
+	return strings.ToLower(bookFormatNodeValue)
 }
 
 // bookTitle gets the book title.
@@ -121,30 +129,38 @@ func parseBookCoversAttrValue(coverSetAttrValue string) string {
 	return originalCoverUrl
 }
 
-// parseBookInfoNodeValue parses the value of the book info node
-// Returns author, publisher and date published.
+// parseBookInfoNodeValue parses the value of the book info node.
+// Returns author and date published if found.
 // See test for expected value format.
 func parseBookInfoNodeValue(bookInfoNodeValue string) (string, *time.Time) {
-	// Book info parts are separated by | the of which is the author
+	// Book info parts are separated by a |
+	// Split the parts and sanitise them.
 	bookInfoParts := strings.Split(bookInfoNodeValue, "|")
-	bookAuthorPart := strings.TrimSpace(bookInfoParts[0])
-	publishDatePart := strings.TrimSpace(bookInfoParts[2])
-
-	// Strip out the "by" from the author part
-	bookAuthorFields := strings.Fields(bookAuthorPart)
-	if len(bookAuthorFields) > 1 && strings.EqualFold(bookAuthorFields[0], "by") {
-		bookAuthorFields = bookAuthorFields[1:]
+	for idx, part := range bookInfoParts {
+		bookInfoParts[idx] = strings.TrimSpace(part)
 	}
 
-	// Rejoin author fields
-	bookAuthor := strings.Join(bookAuthorFields, " ")
-
-	// Parse the date string according to the defined layout
+	// Get author and publish date from info parts.
+	var author string
 	var publishDate *time.Time
-	parsedPublishDate, err := time.Parse(publishDateLayout, publishDatePart)
-	if err == nil {
-		publishDate = &parsedPublishDate
+	for _, part := range bookInfoParts {
+		partFields := strings.Fields(part)
+
+		// Attempt to get author from part
+		// Author is in a part beginning with "by".
+		if len(partFields) > 1 && strings.EqualFold(partFields[0], "by") {
+			author = strings.Join(partFields[1:], " ")
+			continue
+		}
+
+		// Attempt to get publish date from part
+		// Publish date is in a part that can be parsed as a date
+		parsedPublishDate, err := time.Parse(publishDateLayout, part)
+		if err == nil {
+			publishDate = &parsedPublishDate
+			continue
+		}
 	}
 
-	return bookAuthor, publishDate
+	return author, publishDate
 }

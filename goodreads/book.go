@@ -13,20 +13,33 @@ import (
 )
 
 var (
-	alternativeCoverRegex = regexp.MustCompile(`^\s*<i>.*[Aa]lternat(iv)?e cover.*</i>\s*$`)
-	lastBracketRegex      = regexp.MustCompile(`^(.*)(\([^\(\)]*\))([^()]*)$`)
+	// These are dirty workarounds, but they seem to work
+
+	// Regex to match last brackets from title. This is the series.
+	// e.g. Harry Potter and the Chamber of Secrets (Harry Potter, #2)
+	titleSeriesRegex = regexp.MustCompile(`\([^)]*#\d+(\.\d+)?\)$`)
+
+	// Regex to match alternative cover preamble in description.
+	// e.g. Harry Potter and the Chamber of Secrets (Harry Potter, #2)
+	descriptionAlternativeCoverRegex = regexp.MustCompile(`^<i>.*?[Aa]lternat(iv)?e [Cc]over.*?</i>`)
+
+	breakTagRegex = regexp.MustCompile(`<br\s*/?>`)
 )
 
 type BookOverview struct {
-	Id     string `xml:"id"`
-	Title  string `xml:"title"`
-	Author string `xml:"author>name"`
+	Id        string `xml:"id"`
+	FullTitle string `xml:"title"`
+	Author    string `xml:"author>name"`
 }
 
-func (b *BookOverview) Sanitise() {
-	// Strip last brackets from title. This is the series.
-	// e.g. Harry Potter and the Chamber of Secrets (Harry Potter, #2)
-	b.Title = lastBracketRegex.ReplaceAllString(b.Title, "$1$2")
+// Title is the full title with any subtitle and series removed.
+func (o BookOverview) Title() string {
+	return extractTitle(o.FullTitle)
+}
+
+// Subtitle is the subtitle part of the full title with any series removed.
+func (o BookOverview) Subtitle() string {
+	return extractSubtitle(o.FullTitle)
 }
 
 type Book struct {
@@ -65,7 +78,7 @@ func (b *Book) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 }
 
 type Work struct {
-	Title         string `xml:"original_title"`
+	FullTitle     string `xml:"original_title"`
 	MediaType     string `xml:"media_type"`
 	EditionsCount int    `xml:"books_count"`
 
@@ -81,6 +94,16 @@ type Work struct {
 	RatingDistribution string `xml:"rating_dist"`
 }
 
+// Title is the full title with any subtitle and series removed.
+func (w Work) Title() string {
+	return extractTitle(w.FullTitle)
+}
+
+// Subtitle is the subtitle part of the full title with any series removed.
+func (w Work) Subtitle() string {
+	return extractSubtitle(w.FullTitle)
+}
+
 func (w Work) AverageRating() float64 {
 	averageRating := float64(w.RatingsSum) / float64(w.RatingsCount)
 	return math.Round(averageRating*100) / 100 // Round to two decimal places
@@ -89,28 +112,40 @@ func (w Work) AverageRating() float64 {
 type Edition struct {
 	Id               string  `xml:"id"`
 	ISBN             *string `xml:"isbn13"`
-	Title            string  `xml:"title"`
+	FullTitle        string  `xml:"title"`
 	Description      string  `xml:"description"`
 	NumPages         string  `xml:"num_pages"`
 	ImageURL         string  `xml:"image_url"`
 	URL              string  `xml:"url"`
 	Format           string  `xml:"format"`
-	PublicationYear  string  `xml:"publication_year"`
-	PublicationMonth string  `xml:"publication_month"`
-	PublicationDay   string  `xml:"publication_day"`
+	PublicationYear  int     `xml:"publication_year"`
+	PublicationMonth int     `xml:"publication_month"`
+	PublicationDay   int     `xml:"publication_day"`
 	Publisher        string  `xml:"publisher"`
 	CountryCode      string  `xml:"country_code"`
 	Language         string  `xml:"language_code"`
 }
 
-func (e *Edition) Sanitise() {
-	// Description can sometimes be html and contain preamble about alternative covers
-	description := strings.TrimSpace(e.Description)
-	description = alternativeCoverRegex.ReplaceAllString(description, "")
-	description = html2text.HTML2Text(description)
-	e.Description = description
+// Title is the full title with any subtitle and series removed.
+func (e Edition) Title() string {
+	return extractTitle(e.FullTitle)
+}
 
-	// Get original cover image by cleaning the ul0
+// Subtitle is the subtitle part of the full title with any series removed.
+func (e Edition) Subtitle() string {
+	return extractSubtitle(e.FullTitle)
+}
+
+func (e *Edition) Sanitise() {
+	// Description is html and can contain preamble about alternative covers.
+	// Break tags need to be specially handled to add new lines as html2text does
+	// not convert them to new lines properly
+	e.Description = descriptionAlternativeCoverRegex.ReplaceAllString(e.Description, "")
+	e.Description = breakTagRegex.ReplaceAllString(e.Description, "\n")
+	e.Description = html2text.HTML2TextWithOptions(e.Description, html2text.WithUnixLineBreaks())
+	e.Description = strings.TrimSpace(e.Description)
+
+	// Get original cover image by cleaning the url
 	if strings.Contains(e.ImageURL, "nophoto") {
 		e.ImageURL = ""
 	} else {
@@ -137,7 +172,34 @@ func BookIds(books []BookOverview) []string {
 func BookTitles(books []BookOverview) []string {
 	titles := make([]string, 0, len(books))
 	for _, book := range books {
-		titles = append(titles, book.Title)
+		titles = append(titles, book.Title())
 	}
 	return titles
+}
+
+// extractTitle extracts the title from the full title with any subtitle and series removed.
+func extractTitle(fullTitle string) string {
+	titleParts := strings.Split(fullTitle, ":")
+
+	title := titleParts[0]
+	title = strings.TrimSpace(title)
+	title = titleSeriesRegex.ReplaceAllString(title, "")
+	title = strings.TrimSpace(title)
+
+	return title
+}
+
+// extractTitle extracts the subtitle part of the full title with any series removed.
+func extractSubtitle(fullTitle string) string {
+	colonIdx := strings.Index(fullTitle, ":")
+	if colonIdx == -1 {
+		return ""
+	}
+
+	subtitle := fullTitle[colonIdx+1:]
+	subtitle = strings.TrimSpace(subtitle)
+	subtitle = titleSeriesRegex.ReplaceAllString(subtitle, "")
+	subtitle = strings.TrimSpace(subtitle)
+
+	return subtitle
 }
