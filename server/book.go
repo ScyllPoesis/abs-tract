@@ -90,6 +90,7 @@ func goodreadsBookToBookMetadata(goodreadsBook goodreads.Book) BookMetadata {
 		}
 		series = append(series, seriesSingle)
 	}
+	subtitle := " "
 
 	return BookMetadata{
 		// Work Fields
@@ -103,6 +104,7 @@ func goodreadsBookToBookMetadata(goodreadsBook goodreads.Book) BookMetadata {
 		Description: &goodreadsBook.BestEdition.Description,
 		Publisher:   &goodreadsBook.BestEdition.Publisher,
 		Language:    &goodreadsBook.BestEdition.Language,
+		Subtitle:    &subtitle,
 		// Other fields
 		Series: &series,
 		Genres: lo.ToPtr([]string(goodreadsBook.Genres)),

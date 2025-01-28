@@ -45,6 +45,7 @@ var genreShelves = mapset.NewSet(
 	"horror",
 	"humor-and-comedy",
 	"humour",
+	"magic",
 	"manga",
 	"memoir",
 	"music",
@@ -93,11 +94,10 @@ func (g *Genres) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	// Convert shelf names to genres
 	genres := shelvesToGenres(shelfNames)
 
-	// Only use first (up to) three genres
-	if len(genres) < 3 {
+	if len(genres) < 7 {
 		*g = genres
 	} else {
-		*g = genres[:3]
+		*g = genres[:7]
 	}
 
 	return nil
