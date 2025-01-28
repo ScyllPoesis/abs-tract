@@ -35,7 +35,6 @@ var genreShelves = mapset.NewSet(
 	"cookbook",
 	"crime",
 	"fantasy",
-	"fiction",
 	"gay-and-lesbian",
 	"graphic-novel",
 	"high-fantasy",
